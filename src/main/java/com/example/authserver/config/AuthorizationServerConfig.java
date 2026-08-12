@@ -151,6 +151,7 @@ public class AuthorizationServerConfig {
                 .scope("transaction.create")
                 .scope("customer.read")
                 .scope("customer.write")
+
                 .clientSettings(ClientSettings.builder()
                         .requireAuthorizationConsent(false)
                         .build())
@@ -170,23 +171,27 @@ public class AuthorizationServerConfig {
     @Bean
     public OAuth2TokenCustomizer<JwtEncodingContext> tokenCustomizer() {
         return context -> {
-            if (!OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())) {
-                return;
-            }
+            // Always add roles and display claims when the principal is a BankUser.
+            // Scope is only set on access tokens.
             Authentication principal = context.getPrincipal();
             if (principal.getPrincipal() instanceof BankUser user) {
 
+                // Common claims for access and ID tokens / userinfo
                 context.getClaims().subject(user.getSubjectId());
                 context.getClaims().claim("preferred_username", user.getUsername());
                 context.getClaims().claim("name", user.getFullName());
+                // Use an array of roles so OIDC clients can parse them easily
                 context.getClaims().claim("roles", List.of(user.getRole()));
 
-                Set<String> granted = context.getAuthorizedScopes().stream()
-                        .filter(s -> user.getAllowedScopes().contains(s)
-                                || OidcScopes.OPENID.equals(s)
-                                || OidcScopes.PROFILE.equals(s))
-                        .collect(Collectors.toCollection(LinkedHashSet::new));
-                context.getClaims().claim("scope", String.join(" ", granted));
+                // Only add the scope claim to access tokens
+                if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())) {
+                    Set<String> granted = context.getAuthorizedScopes().stream()
+                            .filter(s -> user.getAllowedScopes().contains(s)
+                                    || OidcScopes.OPENID.equals(s)
+                                    || OidcScopes.PROFILE.equals(s))
+                            .collect(Collectors.toCollection(LinkedHashSet::new));
+                    context.getClaims().claim("scope", String.join(" ", granted));
+                }
             }
         };
     }
